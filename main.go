@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	rice "github.com/GeertJohan/go.rice"
@@ -13,15 +12,23 @@ import (
 	"github.com/ngoduykhanh/wireguard-ui/emailer"
 	"github.com/ngoduykhanh/wireguard-ui/handler"
 	"github.com/ngoduykhanh/wireguard-ui/router"
+	"github.com/ngoduykhanh/wireguard-ui/store/jsondb"
 	"github.com/ngoduykhanh/wireguard-ui/util"
 )
 
-// command-line banner information
 var (
+	// command-line banner information
 	appVersion = "development"
 	gitCommit  = "N/A"
 	gitRef     = "N/A"
 	buildTime  = fmt.Sprintf(time.Now().UTC().Format("01-02-2006 15:04:05"))
+	// configuration variables
+	flagDisableLogin   bool   = false
+	flagBindAddress    string = "0.0.0.0:5000"
+	flagSendgridApiKey string
+	flagEmailFrom      string
+	flagEmailFromName  string = "WireGuard UI"
+	flagSessionSecret  string
 )
 
 const (
@@ -34,18 +41,22 @@ const (
 )
 
 func init() {
-	// command-line flags
-	flagDisableLogin := flag.Bool("disable-login", false, "Disable login page. Turn off authentication.")
-	flagBindAddress := flag.String("bind-address", "0.0.0.0:5000", "Address:Port to which the app will be bound.")
+
+	// command-line flags and env variables
+	flag.StringVar(&flagBindAddress, "bind-address", util.LookupEnvOrString("BIND_ADDRESS", flagBindAddress), "Address:Port to which the app will be bound.")
+	flag.StringVar(&flagSendgridApiKey, "sendgrid-api-key", util.LookupEnvOrString("SENDGRID_API_KEY", flagSendgridApiKey), "Your sendgrid api key.")
+	flag.StringVar(&flagEmailFrom, "email-from", util.LookupEnvOrString("EMAIL_FROM_ADDRESS", flagEmailFrom), "'From' email address.")
+	flag.StringVar(&flagEmailFromName, "email-from-name", util.LookupEnvOrString("EMAIL_FROM_NAME", flagEmailFromName), "'From' email name.")
+	flag.StringVar(&flagSessionSecret, "session-secret", util.LookupEnvOrString("SESSION_SECRET", flagSessionSecret), "The key used to encrypt session cookies.")
 	flag.Parse()
 
 	// update runtime config
-	util.DisableLogin = *flagDisableLogin
-	util.BindAddress = *flagBindAddress
-	util.SendgridApiKey = os.Getenv("SENDGRID_API_KEY")
-	util.EmailFrom = os.Getenv("EMAIL_FROM")
-	util.EmailFromName = os.Getenv("EMAIL_FROM_NAME")
-	util.SessionSecret = []byte(os.Getenv("SESSION_SECRET"))
+	util.DisableLogin = flagDisableLogin
+	util.BindAddress = flagBindAddress
+	util.SendgridApiKey = flagSendgridApiKey
+	util.EmailFrom = flagEmailFrom
+	util.EmailFromName = flagEmailFromName
+	util.SessionSecret = []byte(flagSessionSecret)
 
 	// print app information
 	fmt.Println("Wireguard UI")
@@ -56,15 +67,21 @@ func init() {
 	fmt.Println("Git Repo\t:", "https://github.com/ngoduykhanh/wireguard-ui")
 	fmt.Println("Authentication\t:", !util.DisableLogin)
 	fmt.Println("Bind address\t:", util.BindAddress)
+	//fmt.Println("Sendgrid key\t:", util.SendgridApiKey)
+	fmt.Println("Email from\t:", util.EmailFrom)
+	fmt.Println("Email from name\t:", util.EmailFromName)
+	//fmt.Println("Session secret\t:", util.SessionSecret)
 
-	// initialize DB
-	err := util.InitDB()
-	if err != nil {
-		fmt.Print("Cannot init database: ", err)
-	}
 }
 
 func main() {
+	db, err := jsondb.New("./db")
+	if err != nil {
+		panic(err)
+	}
+	if err := db.Init(); err != nil {
+		panic(err)
+	}
 	// set app extra data
 	extraData := make(map[string]string)
 	extraData["appVersion"] = appVersion
@@ -78,32 +95,33 @@ func main() {
 	// register routes
 	app := router.New(tmplBox, extraData, util.SessionSecret)
 
-	app.GET("/", handler.WireGuardClients(), handler.ValidSession)
+	app.GET("/", handler.WireGuardClients(db), handler.ValidSession)
 
 	if !util.DisableLogin {
 		app.GET("/login", handler.LoginPage())
-		app.POST("/login", handler.Login())
+		app.POST("/login", handler.Login(db))
 	}
 
 	sendmail := emailer.NewSendgridApiMail(util.SendgridApiKey, util.EmailFromName, util.EmailFrom)
 
 	app.GET("/logout", handler.Logout(), handler.ValidSession)
-	app.POST("/new-client", handler.NewClient(), handler.ValidSession)
-	app.POST("/update-client", handler.UpdateClient(), handler.ValidSession)
-	app.POST("/email-client", handler.EmailClient(sendmail, defaultEmailSubject, defaultEmailContent), handler.ValidSession)
-	app.POST("/client/set-status", handler.SetClientStatus(), handler.ValidSession)
-	app.POST("/remove-client", handler.RemoveClient(), handler.ValidSession)
-	app.GET("/download", handler.DownloadClient(), handler.ValidSession)
-	app.GET("/wg-server", handler.WireGuardServer(), handler.ValidSession)
-	app.POST("wg-server/interfaces", handler.WireGuardServerInterfaces(), handler.ValidSession)
-	app.POST("wg-server/keypair", handler.WireGuardServerKeyPair(), handler.ValidSession)
-	app.GET("/global-settings", handler.GlobalSettings(), handler.ValidSession)
-	app.POST("/global-settings", handler.GlobalSettingSubmit(), handler.ValidSession)
-	app.GET("/api/clients", handler.GetClients(), handler.ValidSession)
-	app.GET("/api/client/:id", handler.GetClient(), handler.ValidSession)
+	app.POST("/new-client", handler.NewClient(db), handler.ValidSession)
+	app.POST("/update-client", handler.UpdateClient(db), handler.ValidSession)
+	app.POST("/email-client", handler.EmailClient(db, sendmail, defaultEmailSubject, defaultEmailContent), handler.ValidSession)
+	app.POST("/client/set-status", handler.SetClientStatus(db), handler.ValidSession)
+	app.POST("/remove-client", handler.RemoveClient(db), handler.ValidSession)
+	app.GET("/download", handler.DownloadClient(db), handler.ValidSession)
+	app.GET("/wg-server", handler.WireGuardServer(db), handler.ValidSession)
+	app.POST("wg-server/interfaces", handler.WireGuardServerInterfaces(db), handler.ValidSession)
+	app.POST("wg-server/keypair", handler.WireGuardServerKeyPair(db), handler.ValidSession)
+	app.GET("/global-settings", handler.GlobalSettings(db), handler.ValidSession)
+	app.POST("/global-settings", handler.GlobalSettingSubmit(db), handler.ValidSession)
+	app.GET("/status", handler.Status(db), handler.ValidSession)
+	app.GET("/api/clients", handler.GetClients(db), handler.ValidSession)
+	app.GET("/api/client/:id", handler.GetClient(db), handler.ValidSession)
 	app.GET("/api/machine-ips", handler.MachineIPAddresses(), handler.ValidSession)
-	app.GET("/api/suggest-client-ips", handler.SuggestIPAllocation(), handler.ValidSession)
-	app.GET("/api/apply-wg-config", handler.ApplyServerConfig(tmplBox), handler.ValidSession)
+	app.GET("/api/suggest-client-ips", handler.SuggestIPAllocation(db), handler.ValidSession)
+	app.GET("/api/apply-wg-config", handler.ApplyServerConfig(db, tmplBox), handler.ValidSession)
 
 	// servers other static files
 	app.GET("/static/*", echo.WrapHandler(http.StripPrefix("/static/", assetHandler)))
