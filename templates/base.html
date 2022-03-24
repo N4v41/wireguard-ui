@@ -76,9 +76,7 @@
         <aside class="main-sidebar sidebar-dark-primary elevation-4">
             <!-- Brand Logo -->
             <a href="/" class="brand-link">
-                <!-- <img src="static/dist/img/logo.png" alt="Wireguard UI"
-                    class="brand-image img-circle elevation-3" style="opacity: .8"> -->
-                <span class="brand-text font-weight-light">WIREGUARD UI</span>
+                <span class="brand-text">&nbsp; WIREGUARD UI</span>
             </a>
 
             <!-- Sidebar -->
@@ -96,6 +94,7 @@
                 <!-- Sidebar Menu -->
                 <nav class="mt-2">
                     <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
+                        <li class="nav-header">MAIN</li>
                         <li class="nav-item">
                             <a href="/" class="nav-link {{if eq .baseData.Active ""}}active{{end}}">
                                 <i class="nav-icon fas fa-user-secret"></i>
@@ -112,6 +111,7 @@
                                 </p>
                             </a>
                         </li>
+                        <li class="nav-header">SETTINGS</li>
                         <li class="nav-item">
                             <a href="/global-settings" class="nav-link {{if eq .baseData.Active "global-settings" }}active{{end}}">
                                 <i class="nav-icon fas fa-cog"></i>
@@ -120,11 +120,20 @@
                                 </p>
                             </a>
                         </li>
+                        <li class="nav-header">UTILITIES</li>
                         <li class="nav-item">
                             <a href="/status" class="nav-link {{if eq .baseData.Active "status" }}active{{end}}">
-                                <i class="nav-icon fas fa-user"></i>
+                                <i class="nav-icon fas fa-signal"></i>
                                 <p>
                                     Status
+                                </p>
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="/wake_on_lan_hosts" class="nav-link {{if eq .baseData.Active "wake_on_lan_hosts" }}active{{end}}">
+                                <i class="nav-icon fas  fa-solid fa-power-off"></i>
+                                <p>
+                                    WoL Hosts
                                 </p>
                             </a>
                         </li>
@@ -159,9 +168,23 @@
                                 <input type="text" data-role="tagsinput" class="form-control" id="client_allocated_ips">
                             </div>
                             <div class="form-group">
-                                <label for="client_allowed_ips" class="control-label">Allowed IPs</label>
+                                <label for="client_allowed_ips" class="control-label">Allowed IPs
+                                    <i class="fas fa-info-circle" data-toggle="tooltip"
+                                       data-original-title="Specify a list of addresses that will get routed to the
+                                       server. These addresses will be included in 'AllowedIPs' of client config">
+                                    </i>
+                                </label>
                                 <input type="text" data-role="tagsinput" class="form-control" id="client_allowed_ips"
                                     value="0.0.0.0/0">
+                            </div>
+                            <div class="form-group">
+                                <label for="client_extra_allowed_ips" class="control-label">Extra Allowed IPs
+                                    <i class="fas fa-info-circle" data-toggle="tooltip"
+                                       data-original-title="Specify a list of addresses that will get routed to the
+                                       client. These addresses will be included in 'AllowedIPs' of WG server config">
+                                    </i>
+                                </label>
+                                <input type="text" data-role="tagsinput" class="form-control" id="client_extra_allowed_ips">
                             </div>
                             <div class="form-group">
                                 <div class="icheck-primary d-inline">
@@ -179,6 +202,27 @@
                                     </label>
                                 </div>
                             </div>
+                            <details>
+                                <summary><strong>Public and Preshared Keys</strong>
+                                    <i class="fas fa-info-circle" data-toggle="tooltip"
+                                       data-original-title="If you don't want to let the server generate and store the
+                                       client's private, you can manually specify its public and preshared key here
+                                       . Note: QR code will not be generated">
+                                    </i>
+                                </summary>
+                                <div class="form-group" style="margin-top: 1rem">
+                                    <label for="client_public_key" class="control-label">
+                                        Public Key
+                                    </label>
+                                    <input type="text" class="form-control" id="client_public_key" name="client_public_key" placeholder="Autogenerated" aria-invalid="false">
+                                </div>
+                                <div class="form-group">
+                                    <label for="client_preshared_key" class="control-label">
+                                        Preshared Key
+                                    </label>
+                                    <input type="text" class="form-control" id="client_preshared_key" name="client_preshared_key" placeholder="Autogenerated">
+                                </div>
+                            </details>
                         </div>
                         <div class="modal-footer justify-content-between">
                             <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
@@ -267,6 +311,11 @@
     <!-- Custom js -->
     <script src="static/custom/js/helper.js"></script>
     <script>
+        // initialize all tooltips
+        $(function () {
+            $('[data-toggle="tooltip"]').tooltip()
+        })
+
         // populateClient function for render new client info
         // on the client page.
         function populateClient(client_id) {
@@ -293,6 +342,12 @@
             const allocated_ips = $("#client_allocated_ips").val().split(",");
             const allowed_ips = $("#client_allowed_ips").val().split(",");
             let use_server_dns = false;
+            let extra_allowed_ips = [];
+
+            if ($("#client_extra_allowed_ips").val() !== "") {
+                extra_allowed_ips = $("#client_extra_allowed_ips").val().split(",");
+            }
+
 
             if ($("#use_server_dns").is(':checked')){
                 use_server_dns = true;
@@ -303,9 +358,12 @@
             if ($("#enabled").is(':checked')){
                 enabled = true;
             }
+            const public_key = $("#client_public_key").val();
+            const preshared_key = $("#client_preshared_key").val();
 
             const data = {"name": name, "email": email, "allocated_ips": allocated_ips, "allowed_ips": allowed_ips,
-                "use_server_dns": use_server_dns, "enabled": enabled};
+                "extra_allowed_ips": extra_allowed_ips, "use_server_dns": use_server_dns, "enabled": enabled,
+                "public_key": public_key, "preshared_key": preshared_key};
 
             $.ajax({
                 cache: false,
@@ -376,6 +434,16 @@
             'placeholderColor': '#666666'
         });
 
+        $("#client_extra_allowed_ips").tagsInput({
+            'width': '100%',
+            'height': '75%',
+            'interactive': true,
+            'defaultText': 'Add More',
+            'removeWithBackspace': true,
+            'minChars': 0,
+            'placeholderColor': '#666666'
+        });
+
         // New client form validation
         $(document).ready(function () {
             $.validator.setDefaults({
@@ -413,7 +481,10 @@
             $("#modal_new_client").on('shown.bs.modal', function (e) {
                 $("#client_name").val("");
                 $("#client_email").val("");
+                $("#client_public_key").val("");
+                $("#client_preshared_key").val("");
                 $("#client_allocated_ips").importTags('');
+                $("#client_extra_allowed_ips").importTags('');
                 updateIPAllocationSuggestion();
             });
         });

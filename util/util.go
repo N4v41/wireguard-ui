@@ -21,17 +21,21 @@ import (
 // BuildClientConfig to create wireguard client config string
 func BuildClientConfig(client model.Client, server model.Server, setting model.GlobalSetting) string {
 	// Interface section
-	clientAddress := fmt.Sprintf("Address = %s", strings.Join(client.AllocatedIPs, ","))
-	clientPrivateKey := fmt.Sprintf("PrivateKey = %s", client.PrivateKey)
+	clientAddress := fmt.Sprintf("Address = %s\n", strings.Join(client.AllocatedIPs, ","))
+	clientPrivateKey := fmt.Sprintf("PrivateKey = %s\n", client.PrivateKey)
 	clientDNS := ""
 	if client.UseServerDNS {
-		clientDNS = fmt.Sprintf("DNS = %s", strings.Join(setting.DNSServers, ","))
+		clientDNS = fmt.Sprintf("DNS = %s\n", strings.Join(setting.DNSServers, ","))
 	}
 
 	// Peer section
-	peerPublicKey := fmt.Sprintf("PublicKey = %s", server.KeyPair.PublicKey)
-	peerPresharedKey := fmt.Sprintf("PresharedKey = %s", client.PresharedKey)
-	peerAllowedIPs := fmt.Sprintf("AllowedIPs = %s", strings.Join(client.AllowedIPs, ","))
+	peerPublicKey := fmt.Sprintf("PublicKey = %s\n", server.KeyPair.PublicKey)
+	peerPresharedKey := ""
+	if client.PresharedKey != "" {
+		peerPresharedKey = fmt.Sprintf("PresharedKey = %s\n", client.PresharedKey)
+	}
+
+	peerAllowedIPs := fmt.Sprintf("AllowedIPs = %s\n", strings.Join(client.AllowedIPs, ","))
 
 	desiredHost := setting.EndpointAddress
 	desiredPort := server.Interface.ListenPort
@@ -44,24 +48,24 @@ func BuildClientConfig(client model.Client, server model.Server, setting model.G
 			log.Error("Endpoint appears to be incorrectly formatted: ", err)
 		}
 	}
-	peerEndpoint := fmt.Sprintf("Endpoint = %s:%d", desiredHost, desiredPort)
+	peerEndpoint := fmt.Sprintf("Endpoint = %s:%d\n", desiredHost, desiredPort)
 
 	peerPersistentKeepalive := ""
 	if setting.PersistentKeepalive > 0 {
-		peerPersistentKeepalive = fmt.Sprintf("PersistentKeepalive = %d", setting.PersistentKeepalive)
+		peerPersistentKeepalive = fmt.Sprintf("PersistentKeepalive = %d\n", setting.PersistentKeepalive)
 	}
 
 	// build the config as string
 	strConfig := "[Interface]\n" +
-		clientAddress + "\n" +
-		clientPrivateKey + "\n" +
-		clientDNS + "\n\n" +
-		"[Peer]" + "\n" +
-		peerPublicKey + "\n" +
-		peerPresharedKey + "\n" +
-		peerAllowedIPs + "\n" +
-		peerEndpoint + "\n" +
-		peerPersistentKeepalive + "\n"
+		clientAddress +
+		clientPrivateKey +
+		clientDNS +
+		"\n[Peer]\n" +
+		peerPublicKey +
+		peerPresharedKey +
+		peerAllowedIPs +
+		peerEndpoint +
+		peerPersistentKeepalive
 
 	return strConfig
 }
@@ -76,10 +80,18 @@ func ValidateCIDR(cidr string) bool {
 }
 
 // ValidateCIDRList to validate a list of network CIDR
-func ValidateCIDRList(cidrs []string) bool {
+func ValidateCIDRList(cidrs []string, allowEmpty bool) bool {
 	for _, cidr := range cidrs {
-		if ValidateCIDR(cidr) == false {
-			return false
+		if allowEmpty {
+			if len(cidr) > 0 {
+				if ValidateCIDR(cidr) == false {
+					return false
+				}
+			}
+		} else {
+			if ValidateCIDR(cidr) == false {
+				return false
+			}
 		}
 	}
 	return true
@@ -87,7 +99,15 @@ func ValidateCIDRList(cidrs []string) bool {
 
 // ValidateAllowedIPs to validate allowed ip addresses in CIDR format
 func ValidateAllowedIPs(cidrs []string) bool {
-	if ValidateCIDRList(cidrs) == false {
+	if ValidateCIDRList(cidrs, false) == false {
+		return false
+	}
+	return true
+}
+
+// ValidateExtraAllowedIPs to validate extra Allowed ip addresses, allowing empty strings
+func ValidateExtraAllowedIPs(cidrs []string) bool {
+	if ValidateCIDRList(cidrs, true) == false {
 		return false
 	}
 	return true
@@ -95,7 +115,7 @@ func ValidateAllowedIPs(cidrs []string) bool {
 
 // ValidateServerAddresses to validate allowed ip addresses in CIDR format
 func ValidateServerAddresses(cidrs []string) bool {
-	if ValidateCIDRList(cidrs) == false {
+	if ValidateCIDRList(cidrs, false) == false {
 		return false
 	}
 	return true
